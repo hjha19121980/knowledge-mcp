@@ -4,20 +4,89 @@ An enterprise knowledge retrieval MCP server for organizational documents. It pr
 
 ## Requirements
 
+Each user runs the MCP server on their own computer; there is no hosted or deployed MCP endpoint. Each computer needs:
+
 - Node.js 22+
-- PostgreSQL with pgvector (the included Compose file uses `pgvector/pgvector:pg16`)
-- OpenAI or Azure OpenAI credentials for embeddings and summaries
+- Docker Desktop (for the included local PostgreSQL setup), or a PostgreSQL server with pgvector
+- An OpenAI API key, or Azure OpenAI endpoint, key, and deployments for embeddings and summaries
+- VS Code with MCP support, Claude Code, or another MCP client that supports stdio servers
 
-## Setup
+## Clone and build locally
 
-1. Copy `.env.example` to `.env` and configure `DATABASE_URL` and the embedding provider credentials.
-2. Start PostgreSQL with `docker compose up -d postgres`, or provision PostgreSQL and apply `schema.sql`. Compose credentials are local-development defaults; override `POSTGRES_PASSWORD` and set a matching `DATABASE_URL_DOCKER` before deploying beyond a local development environment.
-3. Install and build: `npm ci && npm run build`.
-4. Start the stdio MCP server: `npm start`.
+In PowerShell, choose a local directory and clone the repository:
 
-The database schema uses 1536-dimensional vectors by default, matching `text-embedding-3-small`. If selecting a different embedding model/dimension, update `EMBEDDING_DIMENSIONS` and the `vector(1536)` dimensions in `schema.sql` together. All stored vectors in a database must come from the same embedding model.
+```powershell
+git clone https://github.com/hjha19121980/knowledge-mcp.git
+Set-Location .\knowledge-mcp
+npm ci
+npm run build
+```
 
-Configure the MCP client to launch `node <absolute-path>/dist/index.js` with the environment variables from `.env`. MCP protocol traffic uses stdout; structured logs are emitted separately by Pino.
+Start the local PostgreSQL database with pgvector. The included Compose file starts only PostgreSQL; the MCP client will launch the server process when it connects:
+
+```powershell
+docker compose up -d postgres
+```
+
+Create a local environment file and edit it:
+
+```powershell
+Copy-Item .env.example .env
+notepad .env
+```
+
+Set `DATABASE_URL` to `postgresql://knowledge:knowledge@localhost:5432/knowledge` for the default local Compose database. Set `OPENAI_API_KEY` for OpenAI, or change `EMBEDDING_PROVIDER=azure` and fill in the Azure OpenAI settings. Keep `.env` private; do not commit API keys or database credentials. The Compose database credentials are development defaults—change them before using this setup beyond a personal development machine, and keep `POSTGRES_PASSWORD` and `DATABASE_URL` consistent.
+
+The database schema is mounted into PostgreSQL and applied automatically the first time its data volume is initialized. If you use an existing PostgreSQL database, apply `schema.sql` yourself before connecting. The schema uses 1536-dimensional vectors by default, matching `text-embedding-3-small`. If selecting a different embedding dimension, update `EMBEDDING_DIMENSIONS` and each `vector(1536)` declaration in `schema.sql` together. All vectors in one database must use the same embedding model and dimension.
+
+## Connect from VS Code
+
+Add an MCP server configuration to the VS Code workspace where you want to use the tools. Create `.vscode/mcp.json` in that workspace (or open the MCP configuration editor from VS Code) and use the absolute paths to your local clone. Replace the example user name and path with the path on your computer:
+
+```json
+{
+  "servers": {
+    "knowledge-mcp": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "C:\\Users\\you\\src\\knowledge-mcp\\dist\\index.js"
+      ],
+      "env": {
+        "DOTENV_CONFIG_PATH": "C:\\Users\\you\\src\\knowledge-mcp\\.env"
+      }
+    }
+  }
+}
+```
+
+Save the file, trust the workspace if prompted, then start `knowledge-mcp` from the VS Code MCP server controls (the MCP icon/view or the server entry in the configuration editor). VS Code starts the local Node process on demand; you do not need to run `npm start` in a separate terminal. If `node` is not found when VS Code launches it, use the absolute path to your Node.js executable as `command`.
+
+Keep a personal `.vscode/mcp.json` out of shared commits if it contains machine-specific paths. The `.env` path above points the server to its local secrets file; secrets themselves do not belong in the MCP JSON.
+
+## Connect from Claude Code
+
+With Claude Code installed, register the cloned server for your user from PowerShell. Substitute the path to your clone:
+
+```powershell
+claude mcp add --scope user --transport stdio `
+  --env "DOTENV_CONFIG_PATH=C:\Users\you\src\knowledge-mcp\.env" `
+  knowledge-mcp -- node "C:\Users\you\src\knowledge-mcp\dist\index.js"
+```
+
+`--scope user` makes this local configuration available to your Claude Code sessions for your account. To check the registration, run `claude mcp list`; open or restart a Claude Code session and approve/start the server if prompted. Remove it later with `claude mcp remove knowledge-mcp`.
+
+## Connect from another MCP client
+
+This server uses MCP stdio transport. Configure the client to run `node` with the absolute path to `dist/index.js`, and set `DOTENV_CONFIG_PATH` to the absolute path to the clone's `.env` file. The MCP client starts and stops the server process; do not expose it as a network service. MCP protocol messages use stdout, while Pino logs go to stderr.
+
+## Troubleshooting
+
+- **`DATABASE_URL is missing`**: create `.env` from `.env.example`, or check that `DOTENV_CONFIG_PATH` points to the `.env` file in your clone.
+- **Database connection refused**: check `docker compose ps` and `docker compose logs postgres`; start the database with `docker compose up -d postgres`.
+- **pgvector extension/schema errors**: ensure the database was initialized from `schema.sql`, or apply the schema to the existing database.
+- **Embedding or summary requests fail**: verify the selected provider's API key, endpoint, deployment/model, network access, and configured vector dimension.
+- **Changes are not reflected**: run `npm run build` again; MCP clients execute the generated `dist/index.js`.
 
 ## Available tools
 
@@ -35,3 +104,5 @@ npm run typecheck
 npm test
 npm run build
 ```
+
+For local manual startup while debugging, run `npm start` from the repository after setting up `.env` and PostgreSQL. This starts an stdio MCP server and waits for an MCP client; it is not a web server or an interactive command-line interface.
